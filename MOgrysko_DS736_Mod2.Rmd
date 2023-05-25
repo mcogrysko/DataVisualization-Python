@@ -1,0 +1,339 @@
+---
+title: "Baltimore City Major Crime Data"
+author: "Mike Ogrysko"
+date: "April 2, 2023"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    theme: united
+    code_folding: hide
+---
+
+``` {r setup, message=FALSE, echo=TRUE, warning=FALSE, include=FALSE}
+    library(reticulate)
+    use_python('/opt/anaconda3/envs/native/bin/python', required=TRUE)
+```
+
+
+```{python, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+import pandas as pd
+import numpy as np
+import folium
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+import seaborn as sns
+
+#import dataset
+#removed aboyt 163 records from dates before 2011
+df = pd.read_csv('Part_1_Crime_Data.csv')
+df['CrimeDateTime'] = pd.to_datetime(df['CrimeDateTime'], format='%Y/%m/%d %H:%M:%S')
+df['Hour'] = df.CrimeDateTime.dt.hour
+df['Day'] = df.CrimeDateTime.dt.day
+df['Month'] = df.CrimeDateTime.dt.month
+df['Year'] = df.CrimeDateTime.dt.year
+df['Weekday'] = df.CrimeDateTime.dt.strftime('%a')
+df['MonthName'] = df.CrimeDateTime.dt.strftime('%b')
+```
+
+## Introduction
+
+This report examines major (Part 1) crime incidents in Baltimore City from 2011 to present. The visualizations in this report focus on the districts, neighborhoods, incident times, and incident types associated with major crimes in Baltimore City. 
+
+## Dataset
+
+The data used for this report is the Baltimore City Part 1 Crime Data available through <a href="https://data.baltimorecity.gov/datasets/baltimore::part-1-crime-data/about" target="_blank">Open Baltimore</a>. Each record represents an individual major crime incident that occurred in Baltimore City. The data in each record includes date and time, the district, neighborhood, and geo-location in which the crime occurred, as well as additional information about the crime committed. In total, this dataset includes 557,267 records and 20 features. 
+
+## Findings {.tabset .tabset-fade .tabset-pills}
+
+Given the individual crime data incidents, it seemed interesting to examine the dataset to determine if there were any notable characteristics among the crime types, locations, and timeframes in which the crimes where committed. The following visualizations are discussed in the tabs below:
+<br><br>
+<li>Tab 1 – Horizontal Bar Chart: Top 10 Baltimore City Districts for Major Crime Incidents (2011-Present)</li>
+<li>Tab 2 – Multiple Line Plot: Baltimore City Crime Incident Count by Hour and Day (2011-Present)</li>
+<li>Tab 3 – Nested Pie Chart: Baltimore City Total Crime Incidents by Quarter and Month (2011-Present)</li>
+<li>Tab 4 – Heatmap: Baltimore City Crime Incidents by Type and District (2011-Present)</li>
+<li>Tab 5 – Map: Baltimore City Homicides (2011-Present)</li>
+<br>
+
+### Tab 1 
+
+In this visualization, I created a horizontal bar chart to show the top Baltimore City districts for major crime incidents from 2011 to present. The Northeast district led all districts with 82,586 incidents. In addition to the Northeast, the Southeast, Central, Southern, and Northern districts had totals above the 54329.3 average. The Northwest and Southwest districts were within 1% of the average, and the Eastern, Western, and SD5 districts were all below the average. 
+
+```{python, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+x = df.groupby(['District']).agg({'District':['count']}).reset_index()
+x.columns = ['District','Count']
+#pick colors function
+def pick_colors_according_to_mean_count(this_data):
+    colors=[]
+    avg=this_data.Count.mean()
+    for each in this_data.Count:
+        if each > avg*1.01:
+            colors.append('lightcoral')
+        elif each < avg*0.99:
+            colors.append('green')
+        else:
+            colors.append('black')
+    return colors
+
+#plot Horizontal Bar Chart listing the top districts
+bottom3 = 0
+top3 = len(x)
+d3 = x.loc[bottom3:top3]
+d3 = d3.sort_values('Count', ascending=True)
+d3.reset_index(inplace=True,drop=True)
+my_colors3 = pick_colors_according_to_mean_count(d3)
+
+Above = mpatches.Patch(color = 'lightcoral', label='Above Average')
+At = mpatches.Patch(color = 'black', label='Within 1% of the Average')
+Below = mpatches.Patch(color = 'green', label='Below Average')
+
+fig = plt.figure(figsize=(18,10))
+ax1 = fig.add_subplot(1, 1, 1)
+ax1.barh(d3.District, d3.Count, color=my_colors3)
+
+for row_counter, value_at_row_counter in enumerate(d3.Count):
+    if value_at_row_counter > d3.Count.mean()*1.01:
+        color = 'lightcoral'
+    elif value_at_row_counter < d3.Count.mean()*0.99:
+        color='green'
+    else:
+        color='black'
+    ax1.text(value_at_row_counter+400, row_counter, str(value_at_row_counter), color=color, size=12, fontweight='bold',
+            ha='left', va='center',backgroundcolor='white')
+plt.xlim(0,d3.Count.max()*1.1)
+    
+ax1.legend(loc='lower right', handles=[Above, At, Below], fontsize=14)
+
+plt.axvline(d3.Count.mean(), color='black', linestyle='dashed')
+ax1.text(d3.Count.mean()+2, 0, '  Mean = ' + str(d3.Count.mean()), rotation=0, fontsize=14)
+
+ax1.set_title('Horizontal Bar Chart:\nTop '  + str(top3) + ' Baltimore City Districts for Major Crime Incidents (2011-Present)', size=20)
+ax1.set_xlabel('Crime Incident Count', fontsize = 16)
+ax1.set_ylabel('District', fontsize=16)
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
+
+plt.show()
+```
+
+### Tab 2
+
+In this visualization, I created a multiple line plot to show the crime incidents in Baltimore City by the hour and day. Here, we can see that the days tend to follow a similar pattern. Crime incidents spike between 12 am and 1 am before dropping to lows between 4 am and 6 am. After 6 am, the number of incidents climb to spike again between 3 pm and 6 pm. While the days follow a similar pattern, the number of incidents is highest on Saturday in the 11 pm to 1 am timeframe. 
+
+```{python, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+count_df = df.groupby(['Hour','Weekday']).agg({'Weekday':['count']}).reset_index()
+count_df.columns = ['Hour','Weekday','Count']
+fig = plt.figure(figsize=(18,10))
+ax = fig.add_subplot(1,1,1)
+
+my_colors = {'Mon':'blue',
+            'Tue':'red',
+            'Wed':'green',
+            'Thu':'gray',
+            'Fri':'purple',
+            'Sat':'gold',
+            'Sun':'brown'}
+
+for key, grp in count_df.groupby(['Weekday']):
+    grp.plot(ax=ax, kind='line', x='Hour', y='Count', color = my_colors[key], label=key, marker='8')
+
+plt.title('Multiple Line Plot: \nBaltimore City Crime Incident Count by Hour and Day (2011-Present)', fontsize=18)
+ax.set_xlabel('Hour (24 Hour Interval)', fontsize=18)
+ax.set_ylabel('Total Crime Incident Count', fontsize=18, labelpad=20)
+ax.tick_params(axis='x',labelsize=14, rotation=0)
+ax.tick_params(axis='y',labelsize=14, rotation=0)
+
+ax.set_xticks(np.arange(24))
+
+handles, labels = ax.get_legend_handles_labels()
+handles = [handles[1],handles[5],handles[6],handles[4],handles[0],handles[2],handles[3]]
+labels = [labels[1],   labels[5], labels[6], labels[4], labels[0], labels[2], labels[3]]
+plt.legend(handles, labels, loc='lower right', fontsize=14, ncol=1)
+plt.show()
+```
+
+### Tab 3
+
+In this visualization, I created a nested pie chart to show the number of crime incidents by quarter and month. The incidents were highest in the summer months (Q3). August typically has the most crime incidents. The incidents were lowest in the winter months (Q1). February typically has the fewest crime incidents. 
+
+```{python, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+df['Quarter'] = 'Quarter ' + df.CrimeDateTime.dt.quarter.astype('string')
+pie_df = df.groupby(['Quarter','MonthName','Month']).agg({'Quarter':['count']}).reset_index()
+pie_df = pie_df.sort_values(by=['Month'])
+pie_df.reset_index(inplace=True, drop=True)
+del pie_df['Month']
+pie_df.columns = ['Quarter','MonthName','Count']
+
+number_outside_colors = len(pie_df.Quarter.unique())
+outside_color_ref_number = np.arange(number_outside_colors)*4
+
+number_inside_colors = len(pie_df.MonthName.unique())
+all_color_ref_number = np.arange(number_outside_colors + number_inside_colors)
+
+inside_color_ref_number = []
+for each in all_color_ref_number:
+    if each not in outside_color_ref_number:
+        inside_color_ref_number.append(each)
+
+fig = plt.figure(figsize=(10,10))
+ax = fig.add_subplot(1,1,1)
+
+colormap = plt.get_cmap("tab20c")
+outer_colors = colormap(outside_color_ref_number)
+
+all_crimes = pie_df.Count.sum()
+
+pie_df.groupby(['Quarter'])['Count'].sum().plot(
+        kind='pie',radius=1, colors = outer_colors, pctdistance=0.85,
+        labeldistance = 1.1, wedgeprops = dict(edgecolor='white'),textprops={'fontsize':18},
+        autopct=lambda p: '{:.2f}%\n({:,.0f})'.format(p,(p/100)*all_crimes),
+        startangle=90)
+
+inner_colors = colormap(inside_color_ref_number)
+
+pie_df['Count'].plot(
+        kind='pie',radius=0.7, colors = inner_colors, pctdistance=0.55,
+        labeldistance = 0.8, wedgeprops = dict(edgecolor='white'),textprops={'fontsize':13},
+        labels=pie_df.MonthName,
+        autopct = '%1.2f%%',
+        startangle=90)
+
+hole = plt.Circle((0,0), 0.3, fc='white')
+fig1 = plt.gcf()
+fig1.gca().add_artist(hole)
+
+ax.yaxis.set_visible(False)
+plt.title('Nested Pie Chart: \nBaltimore City Total Crime Incidents by Quarter and Month (2011-Present)', fontsize=18)
+
+ax.axis('equal')
+plt.tight_layout()
+
+ax.text(0,0, 'Total Crime\nIncidents:\n' + '{:,}'.format(all_crimes), size=18, ha='center', va='center')
+
+plt.show()
+
+```
+
+### Tab 4
+
+This visualization is a heatmap that shows the crime types by district with their totals. Larceny is the crime type with the highest totals – maxing out at 18,700 in the Southeast district. Larceny is also high in the Central, Northeast, Northern, and Southern districts. Common Assault is another crime with high totals – maxing out at 14,489 in the Northeast district. Larceny from Auto was particularly high in the Southeast and Central districts. 
+
+```{python, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+hm_df = df.groupby(['District','Description']).agg({'Description':['count']}).reset_index()
+hm_df.columns = ['District','Crime','Count']
+hm_df = hm_df.pivot(index='Crime', columns='District', values = 'Count')
+hm_df = hm_df.dropna(axis='columns')
+hm_df = hm_df.astype(int)
+hm_df = hm_df.sort_index(ascending=False)
+
+fig = plt.figure(figsize=(18,10))
+
+ax = fig.add_subplot(1,1,1)
+
+comma_fmt = FuncFormatter(lambda x, p: format(int(x),','))
+
+ax = sns.heatmap(hm_df, linewidth=0.2, annot = True, cmap='coolwarm', fmt=',',
+                 square=False, annot_kws={'size':11},
+                 cbar_kws = {'format':comma_fmt, 'orientation':'vertical'})
+
+plt.title('Heatmap: Baltimore City Crime Incidents by Type and District (2011-Present)', fontsize=18, pad=15)
+plt.xlabel('District', fontsize=18, labelpad = 10)
+plt.ylabel('Crime Type', fontsize=18, labelpad = 10)
+plt.yticks(rotation=0, size=12)
+plt.xticks(rotation=0, size=12)
+
+ax.invert_yaxis()
+
+cbar = ax.collections[0].colorbar
+
+max_count = hm_df.to_numpy().max()
+min_count = hm_df.to_numpy().min()
+
+my_colorbar_ticks = [*range(500,max_count,1000)]
+cbar.set_ticks(my_colorbar_ticks)
+
+my_colorbar_ticks_labels = ['{:,}'.format(each) for each in my_colorbar_ticks]
+cbar.set_ticklabels(my_colorbar_ticks_labels)
+
+cbar.set_label('Number of Crime Incidents', fontsize=14, rotation=270, labelpad=20, color='black')
+
+plt.show()
+```
+
+### Tab 5
+
+This visualization is a map of Baltimore City showing the location of the homicides committed from 2011 to present. Baltimore is known for its high homicide numbers annually. I thought that this visualization helped to show the areas that had the highest concentrations. Interestingly, the areas next to Loyola’s campus – Homeland, Roland Park, and Guilford – form a U-shape indicating almost no homicides during this time period. 
+
+<center><h4>Map: Baltimore City Homicides (2011-Present)</h4></center>
+```{python, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+c=0
+for each in df['GeoLocation']:
+    try:
+        x = str(each).replace(")","").split("(")[-1].split(",")
+        df.loc[c,'Lat'] = '%.6f' % float(x[0])
+        df.loc[c,'Lon'] = '%.6f' % float(x[1])
+    except:
+        df.loc[c,'Lat'] = np.NaN
+        df.loc[c,'Lon'] = np.NaN
+    c+=1
+
+df['FormatDate'] = df['Weekday'] + ', ' + df['MonthName'] + ' ' + df['Day'].astype(str) + ', ' + df['Year'].astype(str)
+
+center_of_map = [39.3024273, -76.6195023]
+
+my_map = folium.Map(location=center_of_map, 
+                   zoom_start = 12,
+                   width='90%',
+                   height='100%',
+                   left='5%',
+                   right='5%',
+                   top='0%', 
+                   title='Map: Baltimore City Homicides (2011-Present)')
+
+tiles = ['cartodbpositron','openstreetmap','stamenterrain','stamentoner']
+
+for tile in tiles:
+    folium.TileLayer(tile).add_to(my_map)
+    
+folium.LayerControl().add_to(my_map)
+
+for i in range(0,len(df)):
+    crime = df.loc[i, 'Description']
+    if crime == 'HOMICIDE':
+        color = 'red'
+    else:
+        color = 'black'
+    
+    try:
+        if color != 'black':
+            folium.Circle(location=[df.loc[i,'Lat'],df.loc[i,'Lon']],
+                         tooltip = df.loc[i,'Description'],
+                         popup = 'Date: {}\n Neighborhood: {}'.format(df.loc[i,'FormatDate'],df.loc[i,'Neighborhood']),
+                         radius=50,
+                         color=color,
+                         fill=True,
+                         fill_color=color,
+                         fill_opacity = 0.5).add_to(my_map)
+    except:
+        pass
+
+my_map.save('Dots_Homicide_Baltimore.html')
+
+
+my_map
+```
+
+
+## Conclusion
+
+From the visualizations, we learned the following about major crime incidents in Baltimore City:
+<ul>
+<li>The Northeast district leads all districts with 82,586 incidents, while the Eastern, Western, and SD5 districts were all below the average (54329.3). </li>
+<li>Crime incidents spike between 12 am and 1 am before dropping to lows between 4 am and 6 am. After 6 am, the number of incidents climb to spike again between 3 pm and 6 pm.</li>
+<li>The incidents were highest in the summer months (Q3) and lowest in the winter months (Q1).</li>
+<li>Larceny is the crime type with the highest totals – maxing out at 18,700 in the Southeast district.</li>
+<li>The areas next to Loyola’s campus – Homeland, Roland Park, and Guilford – form a U-shape indicating almost no homicides from 2011 to present.</li>
+</ul>
+
